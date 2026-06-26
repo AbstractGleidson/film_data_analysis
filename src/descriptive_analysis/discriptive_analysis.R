@@ -1,859 +1,247 @@
+# ==============================================================================
+# SCRIPT DE ANÁLISE ESTATÍSTICA: MERCADO EXIBIDOR DO CINEMA (2025)
+# Disciplina: Probabilidade e Estatística - UFPI
+# ==============================================================================
+
+# Carregando pacotes
 library(dplyr)
 library(ggplot2)
 library(lubridate)
 library(scales)
+library(lmtest)
 
-# Define area de trabalho
-dataset <- Sys.getenv("FILM_DATASET_DIR") # pega a variavel de ambiente do dir de trabalho 
-print(dataset_dir) # Verifica de carregou corretamente 
+# Configuração do diretório de trabalho
+dataset_dir <- Sys.getenv("FILM_DATASET_DIR")
+if(dataset_dir == "") stop("Variável de ambiente FILM_DATASET_DIR não definida.")
 setwd(dataset_dir)
 
+# Carga do conjunto de dados bruto
 dados <- read.csv2("bilheteria_exibidora_2025_limpo.csv")
 
-# Cria variável origem
+# Tratamento de dados e criação de variáveis suporte
+dados <- dados %>% 
+  filter(TIPO_EXIBICAO == "Filme") %>% 
+  filter(!is.na(UF_SALA_COMPLEXO) & trimws(UF_SALA_COMPLEXO) != "")
+
 dados <- dados %>%
+  filter(!is.na(SESSAO) & trimws(SESSAO) != "") %>%
   mutate(
-    ORIGEM = ifelse(
-      PAIS_OBRA == "BRASIL",
-      "Brasileiro",
-      "Estrangeiro"
-    )
-  )
-
-# Quantidade de filmes brasileiros
-filmes_brasileiros <- dados %>%
-  filter(ORIGEM == "Brasileiro") %>%
-  summarise(
-    filmes = n_distinct(CPB_ROE)
-  )
-
-filmes_brasileiros
-
-# Quantidade de filmes estranjeiros
-filmes_estrangeiros <- dados %>%
-  filter(ORIGEM == "Estrangeiro") %>%
-  summarise(
-    filmes = n_distinct(CPB_ROE)
-  )
-
-filmes_estrangeiros
-
-# Quantidade total de filmes 
-dados %>%
-  summarise(
-    total = n_distinct(CPB_ROE)
-  )
-
-
-# Quantidade de filmes por origem
-filmes_origem <- dados %>%
-  group_by(ORIGEM) %>%
-  summarise(
-    quantidade = n_distinct(CPB_ROE)
-  ) %>%
-  mutate(
-    porcentagem = quantidade / sum(quantidade),
-    rotulo = paste0(
-      ORIGEM,
-      "\n",
-      percent(porcentagem, accuracy = 0.1)
-    )
-  )
-
-ggplot(
-  filmes_origem,
-  aes(
-    x = "",
-    y = quantidade,
-    fill = ORIGEM
-  )
-) +
-  geom_col(
-    width = 1,
-    color = "white"
-  ) +
-  coord_polar("y") +
-  geom_text(
-    aes(label = rotulo),
-    position = position_stack(vjust = 0.5),
-    size = 5
-  ) +
-  theme_void() +
-  labs(
-    title = "Quantidade de filmes por origem"
-  ) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    legend.position = "right"
-  )
-
-# Extrai a hora corretamente
-dados <- dados %>%
-  mutate(
+    ORIGEM = ifelse(PAIS_OBRA == "BRASIL", "Brasileiro", "Estrangeiro"),
     DATA_HORA = dmy_hms(SESSAO),
     HORA = hour(DATA_HORA)
   )
 
-# ===============================
-# FILMES BRASILEIROS
-# ===============================
-
-horarios_br <- dados %>%
-  filter(ORIGEM == "Brasileiro") %>%
-  count(HORA) %>%
+# Criação das variáveis de interesse temporal e demográfico
+dados <- dados %>%
   mutate(
-    percentual = 100 * n / sum(n)
-  ) %>%
-  arrange(desc(n))
-
-top5_br <- horarios_br$HORA[1:5]
-
-horarios_br <- horarios_br %>%
-  mutate(
-    destaque = ifelse(
-      HORA %in% top5_br,
-      "Top 5",
-      "Demais"
-    )
+    ORIGEM = ifelse(PAIS_OBRA == "BRASIL", "Brasileiro", "Estrangeiro"),
+    DATA_HORA = dmy_hms(SESSAO),
+    HORA = hour(DATA_HORA)
   )
 
-ggplot(
-  horarios_br,
-  aes(
-    x = factor(HORA),
-    y = percentual,
-    fill = destaque
-  )
-) +
-  geom_col() +
-  geom_text(
-    aes(
-      label = paste0(round(percentual, 1), "%")
-    ),
-    vjust = -0.3,
-    size = 3.5
-  ) +
-  scale_fill_manual(
-    values = c(
-      "Top 5" = "steelblue",
-      "Demais" = "gray75"
-    )
-  ) +
-  labs(
-    title = "Distribuição dos horários das sessões brasileiras",
-    x = "Horário",
-    y = "Percentual das sessões (%)",
-    fill = ""
-  ) +
-  theme_minimal() +
+# Dicionário para as regiões
+regioes <- c(
+  "AC"="Norte", "AP"="Norte", "AM"="Norte", "PA"="Norte", "RO"="Norte", "RR"="Norte", "TO"="Norte",
+  "AL"="Nordeste", "BA"="Nordeste", "CE"="Nordeste", "MA"="Nordeste", "PB"="Nordeste", "PE"="Nordeste", "PI"="Nordeste", "RN"="Nordeste", "SE"="Nordeste",
+  "DF"="Centro-Oeste", "GO"="Centro-Oeste", "MT"="Centro-Oeste", "MS"="Centro-Oeste",
+  "ES"="Sudeste", "MG"="Sudeste", "RJ"="Sudeste", "SP"="Sudeste",
+  "PR"="Sul", "RS"="Sul", "SC"="Sul"
+)
+dados$REGIAO <- regioes[dados$UF_SALA_COMPLEXO]
+
+# Identidade visual para os gráficos
+cores <- c("Brasileiro" = "#1B9E77", "Estrangeiro" = "#D95F02")
+
+# Tema customizado estruturado sob as normas da ABNT
+tema_abnt <- theme_minimal(base_size = 12) +
   theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    )
-  )
-
-# ===============================
-# FILMES ESTRANGEIROS
-# ===============================
-
-horarios_est <- dados %>%
-  filter(ORIGEM == "Estrangeiro") %>%
-  count(HORA) %>%
-  mutate(
-    percentual = 100 * n / sum(n)
-  ) %>%
-  arrange(desc(n))
-
-top5_est <- horarios_est$HORA[1:5]
-
-horarios_est <- horarios_est %>%
-  mutate(
-    destaque = ifelse(
-      HORA %in% top5_est,
-      "Top 5",
-      "Demais"
-    )
-  )
-
-ggplot(
-  horarios_est,
-  aes(
-    x = factor(HORA),
-    y = percentual,
-    fill = destaque
-  )
-) +
-  geom_col() +
-  geom_text(
-    aes(
-      label = paste0(round(percentual, 1), "%")
-    ),
-    vjust = -0.3,
-    size = 3.5
-  ) +
-  scale_fill_manual(
-    values = c(
-      "Top 5" = "firebrick",
-      "Demais" = "gray75"
-    )
-  ) +
-  labs(
-    title = "Distribuição dos horários das sessões estrangeiras",
-    x = "Horário",
-    y = "Percentual das sessões (%)",
-    fill = ""
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    )
-  )
-
-# Proporcoes das sessoes
-sessoes <- dados %>%
-  count(ORIGEM) %>%
-  mutate(
-    percentual = n / sum(n),
-    rotulo = percent(
-      percentual,
-      accuracy = 0.1
-    )
-  )
-
-ggplot(
-  sessoes,
-  aes(
-    x = "",
-    y = n,
-    fill = ORIGEM
-  )
-) +
-  geom_col(
-    width = 1,
-    color = "white"
-  ) +
-  coord_polar("y") +
-  geom_text(
-    aes(label = rotulo),
-    position = position_stack(vjust = 0.5),
-    size = 6,
-    fontface = "bold"
-  ) +
-  labs(
-    title = "Percentual das sessões por origem",
-    fill = "Origem"
-  ) +
-  theme_void() +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    legend.position = "right",
-    legend.title = element_text(
-      face = "bold"
-    )
-
-total_sessoes <- sum(sessoes$n)
-
-cat("Quantidade de sessões brasileiras:", sessoes$n[sessoes$ORIGEM == "Brasileiro"], "\n")
-cat("Quantidade de sessões estrangeiras:", sessoes$n[sessoes$ORIGEM == "Estrangeiro"], "\n")
-cat("Quantidade total de sessões:",total_sessoes,"\n")
-
-# Publico medio por sessao
-dados %>%
-  group_by(ORIGEM) %>%
-  summarise(
-    publico_medio = mean(PUBLICO)
-  )
-
-# Publico total 
-dados %>%
-  group_by(ORIGEM) %>%
-  summarise(
-    publico_total = sum(PUBLICO)
-  )
-
-# Publico por filme
-dados %>%
-  group_by(ORIGEM, CPB_ROE) %>%
-  summarise(
-    publico = sum(PUBLICO),
-    .groups = "drop"
-  ) %>%
-  group_by(ORIGEM) %>%
-  summarise(
-    media_publico_filme = mean(publico)
-  )
-
-# Ocupacao media das sessoes
-dados %>%
-  group_by(ORIGEM) %>%
-  summarise(
-    publico_sessao = mean(PUBLICO),
-    mediana = median(PUBLICO)
-  )
-
-# Estados que mais exibem filmes nacionais 
-estados <- dados %>%
-  group_by(UF_SALA_COMPLEXO) %>%
-  summarise(
-    total = n(),
-    brasileiras = sum(ORIGEM == "Brasileiro"),
-    percentual = 100 * brasileiras / total,
-    .groups = "drop"
-  ) %>%
-  arrange(desc(percentual))
-
-ggplot(
-  estados,
-  aes(
-    x = reorder(UF_SALA_COMPLEXO, percentual),
-    y = percentual,
-    fill = percentual
-  )
-) +
-  geom_col(width = 0.8) +
-  geom_text(
-    aes(
-      label = paste0(
-        round(percentual, 1),
-        "%"
-      )
-    ),
-    hjust = -0.1,
-    size = 4
-  ) +
-  scale_fill_gradient(
-    low = "#a1d99b",
-    high = "#006d2c"
-  ) +
-  scale_y_continuous(
-    limits = c(0, max(estados$percentual) * 1.1)
-  ) +
-  coord_flip() +
-  labs(
-    title = "Participação dos filmes brasileiros por estado",
-    subtitle = "Percentual das sessões que correspondem a filmes nacionais",
-    x = "Estado",
-    y = "Percentual de sessões brasileiras"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "none",
-    axis.text.y = element_text(
-      face = "bold"
-    )
-  )
-
-# Participacao dos estados na quantidad de sessoes
-sessoes_estado <- dados %>%
-  count(UF_SALA_COMPLEXO) %>%
-  mutate(
-    percentual = 100 * n / sum(n)
-  ) %>%
-  arrange(desc(percentual))
-
-ggplot(
-  sessoes_estado,
-  aes(
-    x = reorder(UF_SALA_COMPLEXO, percentual),
-    y = percentual,
-    fill = percentual
-  )
-) +
-  geom_col(width = 0.8) +
-  geom_text(
-    aes(
-      label = paste0(
-        round(percentual, 1),
-        "%"
-      )
-    ),
-    hjust = -0.15,
-    size = 4
-  ) +
-  scale_fill_gradient(
-    low = "#9ecae1",
-    high = "#08519c"
-  ) +
-  scale_y_continuous(
-    limits = c(
-      0,
-      max(sessoes_estado$percentual) * 1.1
-    )
-  ) +
-  coord_flip() +
-  labs(
-    title = "Participação das sessões de cinema por estado",
-    subtitle = "Percentual das sessões realizadas em cada unidade federativa",
-    x = "Estado",
-    y = "Participação nas sessões (%)"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "none",
-    axis.text.y = element_text(
-      face = "bold"
-    )
-  )
-
-# Municipios que mais exibem filmes nacionais
-dados %>%
-  filter(ORIGEM == "Brasileiro") %>%
-  count(MUNICIPIO_SALA_COMPLEXO) %>%
-  arrange(desc(n))
-
-# Publico por horario - Grafico de heatmap
-publico_hora <- dados %>%
-  group_by(ORIGEM, HORA) %>%
-  summarise(
-    publico_medio = mean(PUBLICO, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-ggplot(
-  publico_hora,
-  aes(
-    x = factor(HORA),
-    y = ORIGEM,
-    fill = publico_medio
-  )
-) +
-  geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(
-    aes(
-      label = round(publico_medio, 1)
-    ),
-    size = 3.5,
-    fontface = "bold"
-  ) +
-  scale_fill_gradient(
-    low = "#deebf7",
-    high = "#08519c",
-    labels = comma
-  ) +
-  labs(
-    title = "Público médio por horário das sessões",
-    subtitle = "Comparação entre filmes brasileiros e estrangeiros",
-    x = "Horário da sessão",
-    y = "Origem",
-    fill = "Público médio"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1
-    ),
-    panel.grid = element_blank()
-  )
-
-# Publico medio por horario - grafico de barras
-ggplot(
-  publico_hora,
-  aes(
-    x = factor(HORA),
-    y = publico_medio,
-    fill = ORIGEM
-  )
-) +
-  geom_col(
-    position = position_dodge(width = 0.9),
-    width = 0.8
-  ) +
-  geom_text(
-    aes(
-      label = comma(round(publico_medio, 0))
-    ),
-    position = position_dodge(width = 0.9),
-    vjust = -0.3,
-    size = 3.2,
-    fontface = "bold"
-  ) +
-  scale_y_continuous(
-    labels = comma,
-    expand = expansion(mult = c(0, 0.08))
-  ) +
-  labs(
-    title = "Público médio por horário das sessões",
-    subtitle = "Comparação entre filmes brasileiros e estrangeiros",
-    x = "Horário da sessão",
-    y = "Público médio por sessão",
-    fill = "Origem"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1
-    ),
     legend.position = "bottom",
-    legend.title = element_text(
-      face = "bold"
-    )
+    legend.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 13),
+    panel.grid.minor = element_blank()
   )
 
-# Numero medio de sessoes por filmes - BloxPlot
-sessoes_filme <- dados %>%
-  group_by(ORIGEM, CPB_ROE) %>%
+
+#========= ANÁLISE NUMÉRICA INICIAL =========
+cat("\n--- ESTRUTURA GERAL DO MERCADO ---\n")
+filmes_resumo <- dados %>%
+  group_by(ORIGEM) %>%
   summarise(
+    filmes = n_distinct(CPB_ROE),
     sessoes = n(),
     .groups = "drop"
   )
+print(filmes_resumo)
 
-ggplot(
-  sessoes_filme,
-  aes(
-    x = ORIGEM,
-    y = sessoes,
-    fill = ORIGEM
-  )
-) +
-  geom_boxplot(
-    alpha = 0.7,
-    outlier.alpha = 0.3
-  ) +
-  scale_y_log10(
-    labels = scales::comma
-  ) +
-  labs(
-    title = "Distribuição do número de sessões por filme",
-    subtitle = "Cada ponto representa um filme",
-    x = "Origem do filme",
-    y = "Número de sessões (escala logarítmica)"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold",
-      size = 16
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "none"
-  )
-
-# Bloxplot - filmes sessao
-ggplot(
-  sessoes_filme,
-  aes(
-    x = ORIGEM,
-    y = sessoes,
-    fill = ORIGEM
-  )
-) +
-  geom_violin(
-    alpha = 0.5,
-    trim = FALSE
-  ) +
-  geom_boxplot(
-    width = 0.15,
-    fill = "white"
-  ) +
-  scale_y_log10(
-    labels = scales::comma
-  ) +
-  labs(
-    title = "Distribuição do número de sessões por filme",
-    subtitle = "Filmes brasileiros e estrangeiros",
-    x = "Origem",
-    y = "Número de sessões (escala log)"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    legend.position = "none"
-  )
-
-
-############################################################
-# PREPARAÇÃO DOS DADOS DOS FILMES
-############################################################
-
-filmes <- dados %>%
-  group_by(ORIGEM, CPB_ROE) %>%
-  summarise(
-    sessoes = n(),
-    publico_total = sum(PUBLICO),
-    publico_medio = mean(PUBLICO),
-    .groups = "drop"
-  )
-
-# Número de sessões versus público total
-ggplot(
-  filmes,
-  aes(
-    x = sessoes,
-    y = publico_total,
-    color = ORIGEM
-  )
-) +
-  geom_point(
-    alpha = 0.6,
-    size = 2.5
-  ) +
-  geom_smooth(
-    method = "lm",
-    se = FALSE,
-    linewidth = 1.2
-  ) +
-  scale_x_log10(labels = comma) +
-  scale_y_log10(labels = comma) +
-  labs(
-    title = "Número de sessões versus público total",
-    subtitle = "Cada ponto representa um filme",
-    x = "Número de sessões (escala logarítmica)",
-    y = "Público total (escala logarítmica)",
-    color = "Origem"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "bottom"
-  )
-
-# Número de sessões versus público médio
-ggplot(
-  filmes,
-  aes(
-    x = sessoes,
-    y = publico_medio,
-    color = ORIGEM
-  )
-) +
-  geom_point(
-    alpha = 0.6,
-    size = 2.5
-  ) +
-  geom_smooth(
-    method = "loess",
-    se = FALSE,
-    linewidth = 1.2
-  ) +
-  scale_x_log10(labels = comma) +
-  scale_y_continuous(labels = comma) +
-  labs(
-    title = "Número de sessões versus público médio",
-    subtitle = "Desempenho médio das sessões",
-    x = "Número de sessões (escala logarítmica)",
-    y = "Público médio por sessão",
-    color = "Origem"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "bottom"
-  )
-
-estados <- dados %>%
-  group_by(UF_SALA_COMPLEXO) %>%
-  summarise(
-    total_sessoes = n(),
-    brasileiras = sum(ORIGEM == "Brasileiro"),
-    percentual_br = 100 * brasileiras / total_sessoes,
-    participacao = 100 * total_sessoes / nrow(dados),
-    .groups = "drop"
-  )
-
-media_nacional <- mean(estados$percentual_br)
-
-# Mercado exibidor versus participação do cinema nacional
-ggplot(
-  estados,
-  aes(
-    x = participacao,
-    y = percentual_br,
-    label = UF_SALA_COMPLEXO
-  )
-) +
-  geom_point(
-    size = 5,
-    color = "steelblue"
-  ) +
-  geom_text(
-    nudge_y = 0.8,
-    fontface = "bold",
-    size = 4
-  ) +
-  geom_hline(
-    yintercept = media_nacional,
-    color = "red",
-    linetype = "dashed"
-  ) +
-  labs(
-    title = "Mercado exibidor versus participação do cinema nacional",
-    subtitle = "A linha vermelha representa a média nacional",
-    x = "Participação nas sessões do Brasil (%)",
-    y = "Sessões brasileiras (%)"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    )
-  )
-
-
-publico_hora <- dados %>%
+cat("\n--- COMPORTAMENTO HORÁRIO: MAIORES PÚBLICOS MÉDIOS ---\n")
+publico_hora_num <- dados %>%
   group_by(ORIGEM, HORA) %>%
-  summarise(
-    publico = mean(PUBLICO),
-    .groups = "drop"
-  )
+  summarise(publico_medio = mean(PUBLICO, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(publico_medio))
+print(head(publico_hora_num, 5))
+
+cat("\n--- ANÁLISE ECONÔMICA DE CONCENTRAÇÃO DE MERCADO (CR20) ---\n")
+sessoes_filme <- dados %>%
+  group_by(ORIGEM, CPB_ROE, TITULO_ORIGINAL) %>%
+  summarise(sessoes = n(), .groups = "drop") %>% 
+  arrange(desc(sessoes))
+
+total_mercado_sessoes <- sum(sessoes_filme$sessoes)
+soma_top20_sessoes <- sum(sessoes_filme$sessoes[1:20])
+cr_20 <- (soma_top20_sessoes / total_mercado_sessoes) * 100
+cat(paste("Razão de Concentração (CR20):", round(cr_20, 2), "%\n"))
 
 
-# Público médio por horário
-ggplot(
-  publico_hora,
-  aes(
-    x = HORA,
-    y = publico,
-    color = ORIGEM,
-    group = ORIGEM
-  )
-) +
-  geom_line(
-    linewidth = 1.3
-  ) +
+#========= ANÁLISE DESCRITIVA GRÁFICA =========
+# Gráfico 1: Proporção Filmes Únicos
+filmes_origem <- dados %>%
+  group_by(ORIGEM) %>%
+  summarise(quantidade = n_distinct(CPB_ROE), .groups = "drop") %>%
+  mutate(percentual = quantidade / sum(quantidade),
+         rotulo = paste0(ORIGEM, "\n", percent(percentual, accuracy = 0.1)))
+
+ggplot(filmes_origem, aes(x = "", y = quantidade, fill = ORIGEM)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar("y") +
+  geom_text(aes(label = rotulo), position = position_stack(vjust = 0.5), size = 4.5, fontface = "bold", color = "white") +
+  scale_fill_manual(values = cores) +
+  labs(fill = "Origem", title = "Gráfico 1: Distribuição percentual de títulos segundo a origem") +
+  tema_abnt + theme(axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank())
+
+
+# Gráfico 2: Proporção Sessões Totais
+sessoes_totais_graf <- dados %>%
+  count(ORIGEM) %>%
+  mutate(percentual = n / sum(n), rotulo = percent(percentual, accuracy = 0.1))
+
+ggplot(sessoes_totais_graf, aes(x = "", y = n, fill = ORIGEM)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar("y") +
+  geom_text(aes(label = rotulo), position = position_stack(vjust = 0.5), size = 4.5, fontface = "bold", color = "white") +
+  scale_fill_manual(values = cores) +
+  labs(fill = "Origem", title = "Gráfico 2: Distribuição percentual de sessões segundo a origem") +
+  tema_abnt + theme(axis.title = element_blank(), axis.text = element_blank(), axis.ticks = element_blank())
+
+
+# Gráfico 3: Participação Percentual Regional
+regional_pct <- dados %>%
+  group_by(REGIAO, ORIGEM) %>%
+  summarise(sessoes = n(), .groups = "drop") %>%
+  group_by(REGIAO) %>%
+  mutate(percentual = 100 * sessoes / sum(sessoes))
+
+ggplot(regional_pct, aes(x = REGIAO, y = percentual, fill = ORIGEM)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = paste0(round(percentual, 1), "%")), position = position_dodge(width = 0.8), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = cores) +
+  labs(x = "Região", y = "Participação das sessões (%)", fill = "Origem", title = "Gráfico 3: Distribuição regional de sessões segundo origem da obra") +
+  tema_abnt
+
+
+# Gráfico 4: Séries Temporais por Horário da Sessão
+sessoes_hora <- dados %>% group_by(ORIGEM, HORA) %>% summarise(sessoes = n(), .groups = "drop")
+ggplot(sessoes_hora, aes(x = HORA, y = sessoes, color = ORIGEM)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 3) +
+  scale_color_manual(values = cores) + scale_y_continuous(labels = scales::comma) +
+  labs(x = "Horário da Sessão", y = "Número de Sessões", color = "Origem", title = "Gráfico 4: Quantidade de sessões por faixa horária") +
+  tema_abnt
+
+
+# Gráfico 5: Boxplot de Dispersão de Sessões com Outliers Mapeados
+ggplot(sessoes_filme, aes(x = ORIGEM, y = sessoes, fill = ORIGEM)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
   geom_point(
-    size = 4
+    data = sessoes_filme %>% group_by(ORIGEM) %>% filter(sessoes > (quantile(sessoes, 0.75) + 1.5 * IQR(sessoes))),
+    aes(x = ORIGEM, y = sessoes), color = "black", size = 1.5, alpha = 0.5
   ) +
-  geom_text(
-    aes(
-      label = round(publico, 1)
-    ),
-    vjust = -0.7,
-    size = 3
-  ) +
-  labs(
-    title = "Público médio por horário",
-    subtitle = "Comparação entre filmes brasileiros e estrangeiros",
-    x = "Hora da sessão",
-    y = "Público médio",
-    color = "Origem"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "bottom"
-  )
+  scale_fill_manual(values = cores) + scale_y_log10(labels = scales::comma) +
+  labs(x = "Origem da Obra", y = "Sessões por Filme (Escala Logarítmica)", title = "Gráfico 5: Dispersão e assimetria do número de sessões por filme") +
+  tema_abnt + theme(legend.position = "none")
 
 
-# Quadrantes de desempenho
-filmes_quad <- filmes %>%
+# Gráfico 6: Média Bruta Observada de Público 
+dados_reais_agrupados <- dados %>%
+  filter(!is.na(PUBLICO) & PUBLICO > 0 & ORIGEM %in% c("Brasileiro", "Estrangeiro")) %>%
+  group_by(ORIGEM) %>% summarise(publico_real_medio = mean(PUBLICO, na.rm = TRUE), .groups = "drop")
+
+ggplot(dados_reais_agrupados, aes(x = ORIGEM, y = publico_real_medio, fill = ORIGEM)) +
+  geom_col(width = 0.5, color = "black", size = 0.4) +
+  geom_text(aes(label = round(publico_real_medio, 1)), vjust = -0.5, fontface = "bold", size = 4.5) +
+  scale_fill_manual(values = cores) + scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Nacionalidade da Obra", y = "Público Médio por Sessão", title = "Gráfico 6: Público Médio por Sessão Segundo Origem da Obra") +
+  tema_abnt + theme(legend.position = "none")
+
+
+#======== TESTES DE HIPÓTESES / INFERÊNCIA ========= 
+cat("\n==== TESTE DE HIPÓTESES PARA MÉDIAS ====\n")
+
+# Isolamento amostral 
+dados_validos <- dados %>% filter(!is.na(PUBLICO) & PUBLICO > 0 & ORIGEM %in% c("Brasileiro", "Estrangeiro"))
+cat("\n TESTE F PARA HOMOGENEIDADE DE VARIÂNCIAS:\n")
+teste_variancia <- var.test(PUBLICO ~ ORIGEM, data = dados_validos)
+print(teste_variancia)
+
+cat("\n TESTE T DE SAMPLES INDEPENDENTES:\n")
+teste_t_final <- t.test(PUBLICO ~ ORIGEM, data = dados_validos, alternative = "two.sided", var.equal = FALSE)
+print(teste_t_final)
+
+
+#======== REGRESSÃO LINEAR MULTIVARIÁVEL ==========
+cat("EXECUTANDO MODELAGEM POR REGRESSÃO E DIAGNÓSTICO DE RESÍDUOS\n")
+
+set.seed(42) # Assegura reprodutibilidade amostral
+
+# Amostragem Estratificada para diminuir o esforço computacional
+dados_reg <- dados %>%
+  filter(!is.na(PUBLICO) & !is.na(HORA) & !is.na(REGIAO) & PUBLICO > 0) %>%
   mutate(
-    log_sessoes = log10(sessoes),
-    log_publico = log10(publico_total)
-  )
+    ORIGEM = factor(ORIGEM, levels = c("Brasileiro", "Estrangeiro")),
+    REGIAO = factor(REGIAO),
+    HORA = factor(HORA),
+    log_publico = log(PUBLICO)
+  ) %>%
+  group_by(ORIGEM) %>%
+  slice_sample(n = 100000, replace = FALSE) %>% # Amostra representativa robusta
+  ungroup()
 
-media_sessoes <- mean(filmes_quad$log_sessoes)
-media_publico <- mean(filmes_quad$log_publico)
+# Ajuste por Mínimos Quadrados Ordinários (MQO)
+modelo <- lm(log_publico ~ ORIGEM + HORA + REGIAO, data = dados_reg)
+print(summary(modelo))
 
-ggplot(
-  filmes_quad,
-  aes(
-    x = log_sessoes,
-    y = log_publico,
-    color = ORIGEM
-  )
-) +
-  geom_point(
-    alpha = 0.6,
-    size = 2.5
-  ) +
-  geom_vline(
-    xintercept = media_sessoes,
-    linetype = "dashed"
-  ) +
-  geom_hline(
-    yintercept = media_publico,
-    linetype = "dashed"
-  ) +
-  labs(
-    title = "Quadrantes de desempenho dos filmes",
-    subtitle = "Sessões versus público total",
-    x = "Log do número de sessões",
-    y = "Log do público total",
-    color = "Origem"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(
-      hjust = 0.5,
-      face = "bold"
-    ),
-    plot.subtitle = element_text(
-      hjust = 0.5
-    ),
-    legend.position = "bottom"
-  )
+cat("\n--- DIAGNÓSTICO DE PRESSUPOSTOS DA REGRESSÃO  ---\n")
+# Verificação Gráfica 
+par(mfrow = c(2, 2))
+plot(modelo)
+par(mfrow = c(1, 1))
+
+# Teste de Homocedasticidade de Breusch-Pagan 
+cat("\nTeste de Breusch-Pagan:\n")
+print(bptest(modelo))
+
+# Teste de Independência de Resíduos de Durbin-Watson 
+cat("\nTeste de Durbin-Watson:\n")
+print(dwtest(modelo))
+
+# Diagnóstico de Observações Influenciantes através da Distância de Cook 
+cat("\nSumário Descritivo da Distância de Cook (Valores > 0.4 indicam anomalias):\n")
+dist_cook <- cooks.distance(modelo)
+print(summary(dist_cook))
+
+
+# Construção gráfica com base nos dados previstos 
+fator_smearing <- mean(exp(residuals(modelo)))
+dados_reg$publico_previsto <- exp(predict(modelo)) * fator_smearing
+
+previsto_graf <- dados_reg %>%
+  group_by(ORIGEM) %>%
+  summarise(publico_esperado = mean(publico_previsto), .groups = "drop")
+
+ggplot(previsto_graf, aes(x = ORIGEM, y = publico_esperado, fill = ORIGEM)) +
+  geom_col(width = 0.5, color = "black", size = 0.4) +
+  geom_text(aes(label = round(publico_esperado, 1)), vjust = -0.5, fontface = "bold", size = 4.5) +
+  scale_fill_manual(values = cores) + scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Nacionalidade da Obra", y = "Público Esperado por Sessão (Modelo)", 
+       title = "Gráfico 7: Efeitos marginais previstos para o público esperado por sessão") +
+  tema_abnt + theme(legend.position = "none")
