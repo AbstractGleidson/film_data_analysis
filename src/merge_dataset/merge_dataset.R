@@ -9,7 +9,6 @@ dataset_dir <- Sys.getenv("FILM_DATASET_EX_DIR") # pega a variavel de ambiente d
 print(dataset_dir) # Verifica de carregou corretamente 
 setwd(dataset_dir)
 
-
 # Pega todos os caminhos dos arquivos .csv
 files <- list.files(
   pattern = "\\.csv$", 

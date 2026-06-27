@@ -137,6 +137,37 @@ empty_columns <- sapply(
 )
 print(empty_columns)
 
+# Tratamento de dados e criação de variáveis suporte
+dataset_bilheteria <- dataset_bilheteria %>% 
+  filter(TIPO_EXIBICAO == "Filme") %>% 
+  filter(!is.na(UF_SALA_COMPLEXO) & trimws(UF_SALA_COMPLEXO) != "")
+
+dataset_bilheteria <- dataset_bilheteria %>%
+  filter(!is.na(SESSAO) & trimws(SESSAO) != "") %>%
+  mutate(
+    ORIGEM = ifelse(PAIS_OBRA == "BRASIL", "Brasileiro", "Estrangeiro"),
+    DATA_HORA = dmy_hms(SESSAO),
+    HORA = hour(DATA_HORA)
+  )
+
+# Criação das variáveis de interesse temporal e demográfico
+dataset_bilheteria <- dataset_bilheteria %>%
+  mutate(
+    ORIGEM = ifelse(PAIS_OBRA == "BRASIL", "Brasileiro", "Estrangeiro"),
+    DATA_HORA = dmy_hms(SESSAO),
+    HORA = hour(DATA_HORA)
+  )
+
+# Dicionário para as regiões
+regioes <- c(
+  "AC"="Norte", "AP"="Norte", "AM"="Norte", "PA"="Norte", "RO"="Norte", "RR"="Norte", "TO"="Norte",
+  "AL"="Nordeste", "BA"="Nordeste", "CE"="Nordeste", "MA"="Nordeste", "PB"="Nordeste", "PE"="Nordeste", "PI"="Nordeste", "RN"="Nordeste", "SE"="Nordeste",
+  "DF"="Centro-Oeste", "GO"="Centro-Oeste", "MT"="Centro-Oeste", "MS"="Centro-Oeste",
+  "ES"="Sudeste", "MG"="Sudeste", "RJ"="Sudeste", "SP"="Sudeste",
+  "PR"="Sul", "RS"="Sul", "SC"="Sul"
+)
+dataset_bilheteria$REGIAO <- regioes[dataset_bilheteria$UF_SALA_COMPLEXO]
+
 # Salva dataset limpo
 write.csv2(
   dataset_bilheteria,
